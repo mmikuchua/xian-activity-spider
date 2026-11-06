@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 本地运行产物 / 密钥
+.env
+.env.*
+!.env.example
+output/
+data/snapshots/*.xlsx
+*.log
+!data/samples/*
+
+# 浏览器驱动与大文件
+chromedriver.exe
+ngrok.exe
+*.exe
+*.zip
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
