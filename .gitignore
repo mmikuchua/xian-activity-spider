@@ -12,6 +12,8 @@ venv/
 !.env.example
 output/
 data/snapshots/*.xlsx
+data/tmp/
+.cache/
 *.log
 !data/samples/*
 

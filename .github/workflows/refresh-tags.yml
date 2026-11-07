@@ -1,0 +1,39 @@
+name: Refresh tags
+
+# 手动触发：重新跑一遍 LLM 语义标注并提交 data/activities.json。
+# 不包含抓取（本地宝有人机验证，CI 里跑不通），需要先在本机 crawl 后提交 data/raw。
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 这次刷新的原因
+        required: false
+        default: manual refresh
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Build dataset
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python -m xian_activities.cli build
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/activities.json; then
+            echo "没有变化"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/activities.json
+          git commit -m "chore(data): refresh LLM tags (${{ github.event.inputs.reason }})"
+          git push
