@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 DATE_PART = re.compile(
@@ -77,14 +77,18 @@ def parse_date_range(text: str, *, default_year: Optional[int] = None) -> Tuple[
 
 
 def parse_timestamp(value) -> Optional[str]:
-    """秒级时间戳（本地宝/豆瓣常见）→ ISO 字符串。"""
+    """秒级时间戳（本地宝/豆瓣常见）→ 北京时间 ISO 字符串。
+
+    固定按 UTC+8 解释，避免 GitHub Actions（UTC）与本地（CST）结果不一致。
+    """
     try:
         stamp = int(float(value))
     except (TypeError, ValueError):
         return None
     if stamp <= 0:
         return None
-    return datetime.fromtimestamp(stamp).isoformat(timespec="minutes")
+    beijing = timezone(timedelta(hours=8))
+    return datetime.fromtimestamp(stamp, tz=beijing).replace(tzinfo=None).isoformat(timespec="minutes")
 
 
 def is_expired(valid_end: Optional[str], *, days: int = 0) -> bool:
