@@ -2,7 +2,8 @@
 
 把「西安本地宝 / 陕西大剧院 / 陕西省图书馆」的活动信息抓下来，用 DeepSeek 做语义标注，
 再以 API 的形式提供**可解释的活动推荐**。推荐结果直接喂给站点
-[文享智配](../wenxiang-website)，也可以被 Coze / 扣子等工作流调用。
+[文享智配](https://mmikuchua.github.io/wenxiang-website/)（源码：
+[wenxiang-website](https://github.com/mmikuchua/wenxiang-website)），也可以被 Coze / 扣子等工作流调用。
 
 > 前身是一堆各跑各的脚本（`app.py`、`app_final.py`、`activity_api.py`、`1.py`、`420.py` …），
 > 现在合并成一个包：抓取 → 清洗 → LLM 打标 → 导出 / API。

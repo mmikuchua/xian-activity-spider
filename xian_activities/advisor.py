@@ -188,7 +188,7 @@ class Advisor:
                 result = self.client.chat_json(
                     self._messages(query, profile, candidates, k),
                     temperature=0.25,
-                    max_tokens=1600,
+                    max_tokens=2500,
                 )
                 picks = self._normalize_picks(result, candidates, k)
                 if picks:
