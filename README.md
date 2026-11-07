@@ -25,6 +25,22 @@
   没有 API Key 或调用失败时自动降级为规则排序，接口不会 500。
 - **缓存**：标注结果按内容哈希缓存在 `.cache/enrich/`，重复构建 0 次模型调用、秒级完成。
 
+## 数据源
+
+| 数据源 | 适配器 | 方式 | 说明 |
+| --- | --- | --- | --- |
+| 豆瓣同城 · 西安 | `sources/douban.py` | HTTP | 默认/售票/周末三个榜单，带档期、场馆、票价 |
+| 活动行 · 西安 | `sources/huodongxing.py` | HTTP | 已用关键词过滤掉商业培训/行业会议，只留文化活动 |
+| 西安本地宝 | `sources/bendibao_http.py` | HTTP | 活动日历 JSON 接口，最快最全；被人机验证挡住时自动跳过 |
+| 西安本地宝（兜底） | `sources/bendibao.py` | 浏览器 | 本机 Selenium 抓取，适合被验证码拦截时手动补数据 |
+| 陕西历史博物馆 | `sources/sxhm.py` | HTTP | 临时展览（含展期/展厅），自动过滤已结束的 |
+| 陕西省图书馆 | `sources/sxlib.py` | HTTP | 陕图讲坛讲座预告 |
+| 陕西大剧院 | `sources/snpac.py` | 浏览器 | SPA，需要本机 Chrome，CI 中跳过 |
+
+- **HTTP 数据源**只依赖 `beautifulsoup4`，可以在 GitHub Actions 的服务器上跑；
+- 单个源失败不会中断整批，报告里会写明失败原因；
+- 抓取结果会做去重（名称+地址归一化）。
+
 ## 快速开始
 
 ```bash
@@ -37,15 +53,24 @@ python -m xian_activities.cli build        # 语义增强，生成 data/activiti
 python -m xian_activities.cli serve        # 启动 API：http://127.0.0.1:8000/docs
 ```
 
-抓取（需要本机 Chrome，Selenium Manager 会自动配驱动）：
+抓取与增量更新：
 
 ```bash
-python -m xian_activities.cli crawl --source all --out data/raw/crawl.json
+# 只跑 HTTP 数据源（CI 用的就是这一条）
+python -m xian_activities.cli update --http-only
+
+# 本机全量：加上陕西大剧院等需要浏览器的源
+python -m xian_activities.cli update --all-sources
+
+# 只看抓取结果，不打标
+python -m xian_activities.cli crawl --source all --http-only --out data/raw/crawl.json
 ```
 
-> ⚠️ 西安本地宝目前有**拼图人机验证**。无头模式/机房 IP 大概率被拦，
-> 被拦时会抛 `RuntimeError("bendibao: 触发站点人机验证…")`，而不是静默写入空数据。
-> 建议在本机 `HEADLESS=0` 下抓取后再同步；GitHub Actions 里不要指望它每次都能跑通。
+`update` 的流程是：抓取 → 与现有 `data/activities.json` 增量合并 → 只为新增/内容变更的活动调用模型 → 导出。
+合并会保留已有标签，按内容哈希跳过未变化的条目；明确结束超过 90 天的活动会被淘汰。
+
+> ⚠️ 西安本地宝有**拼图人机验证**，机房 IP 大概率被拦，被拦时会抛明确异常并保留旧数据。
+> 建议在本机 `HEADLESS=0` 下用 `--all-sources` 补一次。
 
 ## HTTP API
 
@@ -145,21 +170,37 @@ docker run -p 8000:8000 --env-file .env xian-activities
 ## 测试
 
 ```bash
-python -m unittest discover -s tests -v     # 32 个用例，全部离线
+python -m unittest discover -s tests -v     # 53 个用例，全部离线
 ```
 
-覆盖：价格/行政区归一化、去重、LLM 输出清洗、三个数据源的 HTML 解析、AI 顾问召回与降级。
+覆盖：价格/行政区归一化、日期区间解析、增量合并与过期淘汰、LLM 输出清洗与跳过逻辑、
+6 个数据源的 HTML/JSON 解析、AI 顾问召回与降级。
+
+## 定时更新
+
+定时任务放在站点仓库（因为它需要把结果提交成 `web/data/activities.json` 并发布 Pages）：
+[`wenxiang-website/.github/workflows/refresh-data.yml`](https://github.com/mmikuchua/wenxiang-website/blob/main/.github/workflows/refresh-data.yml)
+
+- 每天 UTC 20:23（北京时间 04:23）运行；
+- 每次运行会 checkout 本仓库、抓取 HTTP 数据源、增量合并、只标注新增条目；
+- 结果提交后直接部署到 GitHub Pages；
+- 也可以在 Actions 页面手动触发，指定数据源与本次最多标注条数。
+
+成本控制：未变化的条目按 `enriched.hash` 跳过，不会重复调用模型；`--max-enrich` 限制单次调用量。
 
 ## 目录
 
 ```
 xian_activities/
-  sources/        # bendibao / snpac / sxlib 抓取 + 纯函数解析
-  enrich.py       # LLM 打标提示词、批量并发、缓存、标签合并
+  sources/        # douban / huodongxing / bendibao(_http) / sxhm / sxlib / snpac
+  enrich.py       # LLM 打标提示词、批量并发、缓存、按内容哈希跳过
+  merge.py        # 增量合并、字段更新、过期淘汰
+  dates.py        # 中文日期区间 / 时间戳解析
+  http.py         # 带重试与编码兜底的 HTTP 工具
   advisor.py      # 召回 + 大模型重排 + 规则兜底
   server.py       # FastAPI
-  pipeline.py     # 加载 → 去重 → 增强 → 导出
-  cli.py          # build / crawl / serve / check
+  pipeline.py     # 加载 → 抓取 → 合并 → 增强 → 导出
+  cli.py          # build / update / crawl / serve / check
 tools/import_legacy.py   # 历史 SQLite 数据迁移
 data/raw/                # 原始数据（可重放）
 data/activities.json     # 站点直接消费的成品

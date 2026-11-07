@@ -40,6 +40,29 @@ def slug_id(*parts: str) -> str:
     return f"act-{digest}"
 
 
+_TITLE_PREFIX = re.compile(
+    r"^(?:\d{1,2}\s*[./月]\s*\d{1,2}\s*日?\s*(?:周[一二三四五六日天]|上午|下午|晚上)?\s*[|｜丨]?\s*)+"
+)
+_TITLE_SUFFIX = re.compile(r"[（(]\s*下滑阅读(?:活动)?详情\s*[）)]")
+_TITLE_CITY = re.compile(r"^(?:【西安】|西安\s*[|｜丨]\s*)")
+_TITLE_LEAD = re.compile(r"^(?:上午|下午|晚上|周六|周日|周末)\s*")
+
+
+def clean_title(name: str) -> str:
+    """去掉活动行/豆瓣标题里的日期前缀和运营后缀，保留内容本身。"""
+    text = clean_text(name, 160)
+    for _ in range(3):
+        before = text
+        text = _TITLE_CITY.sub("", text)
+        text = _TITLE_PREFIX.sub("", text)
+        text = _TITLE_LEAD.sub("", text)
+        text = _TITLE_SUFFIX.sub("", text)
+        text = text.strip(" |｜丨-—")
+        if text == before:
+            break
+    return text or clean_text(name, 160)
+
+
 _PRICE_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)")
 
 
@@ -150,6 +173,7 @@ class Activity:
     valid_start: Optional[str] = None
     valid_end: Optional[str] = None
     enriched: Dict[str, Any] = field(default_factory=dict)
+    seen_at: str = ""
 
     # ------------------------------------------------------------------ 构造
     def __post_init__(self) -> None:

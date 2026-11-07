@@ -80,6 +80,14 @@ def _cache_key(activity: Activity) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
+def semantic_hash(activity: Activity) -> str:
+    """只覆盖「语义内容」的指纹：档期/票价变了不需要重新打标。"""
+    payload = "|".join(
+        [PROMPT_VERSION, activity.name, activity.category_text, activity.highlights[:400]]
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def _clip_codes(values: Iterable[Any], allowed: Dict[str, str], limit: int) -> List[str]:
     if isinstance(values, str):
         values = [values]
@@ -274,6 +282,7 @@ class ActivityEnricher:
             "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "version": PROMPT_VERSION,
             "cached": cached,
+            "hash": semantic_hash(activity),
         }
         return activity
 
@@ -318,12 +327,27 @@ class ActivityEnricher:
             )
         return EnrichResult(activity, used_llm=False, cached=False, error="未命中缓存")
 
-    def enrich_all(self, activities: List[Activity], *, progress: bool = True) -> Tuple[List[Activity], Dict[str, Any]]:
-        """批量增强：先吃缓存，其余并发送 LLM；任何一条失败都保留原标签。"""
+    def enrich_all(
+        self,
+        activities: List[Activity],
+        *,
+        progress: bool = True,
+        skip_enriched: bool = True,
+        max_items: Optional[int] = None,
+    ) -> Tuple[List[Activity], Dict[str, Any]]:
+        """批量增强：已标注且内容未变的直接跳过，其余先吃缓存再并发送 LLM。"""
         self.settings.require_llm()
         pending: List[Activity] = []
         cache_hits = 0
+        skipped = 0
         for activity in activities:
+            if (
+                skip_enriched
+                and activity.enriched.get("model")
+                and activity.enriched.get("hash") == semantic_hash(activity)
+            ):
+                skipped += 1
+                continue
             key = _cache_key(activity)
             cached_payload = self._read_cache(key)
             if cached_payload is not None:
@@ -331,6 +355,10 @@ class ActivityEnricher:
                 cache_hits += 1
             else:
                 pending.append(activity)
+
+        if max_items is not None and len(pending) > max_items:
+            logger.warning("本次只标注前 %s 条，剩余 %s 条留到下次", max_items, len(pending) - max_items)
+            pending = pending[:max_items]
 
         batches = [pending[i : i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
         failures: List[str] = []
@@ -355,7 +383,9 @@ class ActivityEnricher:
 
         stats = {
             "total": len(activities),
+            "skipped": skipped,
             "cache_hits": cache_hits,
+            "pending": len(pending),
             "llm_calls": self.client.usage.calls,
             "failures": failures[:10],
             "failed_count": len(failures),

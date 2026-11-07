@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""数据流水线：加载 → 去重 → LLM 语义增强 → 导出。"""
+"""数据流水线：加载 → 抓取 → 合并 → LLM 语义增强 → 导出。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .config import settings
 from .enrich import ActivityEnricher
 from .export import write_json
+from .merge import merge
 from .models import Activity, dedupe
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,10 @@ BUILD_PATH = settings.data_dir / "activities.json"
 
 
 def load_activities(path: Path | str) -> List[Activity]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    path = Path(path)
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
     items = payload.get("activities", payload if isinstance(payload, list) else [])
     activities = []
     for item in items:
@@ -66,3 +70,49 @@ def build(
     )
     stats["out"] = str(out_path)
     return activities, stats
+
+
+def update(
+    *,
+    base_path: Path | str = BUILD_PATH,
+    out_path: Path | str = BUILD_PATH,
+    sources: str = "all",
+    http_only: bool = True,
+    limit: Optional[int] = None,
+    use_llm: bool = True,
+    max_enrich: Optional[int] = None,
+    use_cache: bool = True,
+) -> Tuple[List[Activity], Dict[str, Any]]:
+    """增量更新：抓取 → 合并到现有活动库 → 只为新/变更条目调用 LLM → 导出。"""
+    from .sources import crawl_all
+
+    existing = load_activities(base_path)
+    incoming, crawl_report = crawl_all(sources, limit=limit, http_only=http_only)
+    merged, merge_stats = merge(existing, incoming)
+
+    stats: Dict[str, Any] = {
+        "existing": len(existing),
+        "crawl": crawl_report,
+        "merge": merge_stats,
+    }
+
+    if use_llm and settings.llm_enabled:
+        enricher = ActivityEnricher(use_cache=use_cache)
+        merged, enrich_stats = enricher.enrich_all(merged, max_items=max_enrich)
+        stats["enrich"] = enrich_stats
+    else:
+        stats["enrich"] = {"skipped": True, "reason": "no api key"}
+
+    write_json(
+        merged,
+        Path(out_path),
+        meta={
+            "pipeline": "xian-activities/update",
+            "sources": sorted({activity.source for activity in merged if activity.source}),
+            "last_update": crawl_report,
+            "llm": stats.get("enrich", {}).get("usage", {}),
+        },
+    )
+    stats["out"] = str(out_path)
+    stats["total"] = len(merged)
+    return merged, stats

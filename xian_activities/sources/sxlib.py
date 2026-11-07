@@ -1,20 +1,39 @@
 # -*- coding: utf-8 -*-
-"""陕西省图书馆 · 陕图讲坛（讲座预告）。"""
+"""陕西省图书馆 · 陕图讲坛（讲座预告）。
+
+列表页是静态 HTML（ul#zebra），直接 HTTP 抓取即可，不再需要浏览器。
+"""
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Optional
 
 from bs4 import BeautifulSoup
 
+from ..dates import parse_date_range
+from ..http import get
 from ..models import Activity
-from ._browser import browser
 
 logger = logging.getLogger(__name__)
 
 SOURCE = "陕西省图书馆"
 LIST_URL = "https://www.sxlib.org.cn/hd/hdyg/stjt/"
+
+TITLE_DATE = re.compile(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日[^：:]{0,10}?([上下]午)?")
+
+
+def _date_from_title(name: str) -> tuple[Optional[str], Optional[str]]:
+    match = TITLE_DATE.search(name)
+    if not match:
+        return None, None
+    year, month, day, period = match.groups()
+    start, end = parse_date_range(f"{year}年{month}月{day}日")
+    if start and period:
+        hour = "14:00" if period == "下" else "09:00"
+        start = f"{start[:10]}T{hour}"
+    return start, start
 
 
 def parse_list(html: str) -> List[Activity]:
@@ -37,6 +56,7 @@ def parse_list(html: str) -> List[Activity]:
             link = anchor["href"]
             if not link.startswith("http"):
                 link = "https://www.sxlib.org.cn" + link
+        valid_start, valid_end = _date_from_title(name)
         activities.append(
             Activity(
                 name=name,
@@ -48,6 +68,8 @@ def parse_list(html: str) -> List[Activity]:
                 price_text="免费（公益讲座）",
                 highlights="陕图讲坛公益讲座，具体主题与报名方式见详情页。",
                 link=link,
+                valid_start=valid_start,
+                valid_end=valid_end,
                 tags={
                     "categories": ["B"],
                     "demand": ["B"],
@@ -65,15 +87,7 @@ def parse_list(html: str) -> List[Activity]:
 
 
 def fetch(limit: Optional[int] = None) -> List[Activity]:
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-
-    with browser() as driver:
-        driver.get(LIST_URL)
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul#zebra")))
-        html = driver.page_source
-
+    html = get(LIST_URL, timeout=25)
     activities = parse_list(html)
     if not activities:
         raise RuntimeError("sxlib: 未解析到讲座，页面结构可能已变化")

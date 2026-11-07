@@ -63,7 +63,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_crawl(args: argparse.Namespace) -> int:
     from .sources import crawl_all
 
-    activities, report = crawl_all(args.source)
+    activities, report = crawl_all(args.source, limit=args.limit, http_only=args.http_only)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.out:
         from .export import write_json
@@ -71,6 +71,26 @@ def cmd_crawl(args: argparse.Namespace) -> int:
         write_json(activities, Path(args.out))
         print(f"✅ 原始数据 -> {args.out}")
     return 0 if activities else 1
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    from .pipeline import BUILD_PATH, update
+
+    out = Path(args.out) if args.out else BUILD_PATH
+    base = Path(args.base) if args.base else out
+    activities, stats = update(
+        base_path=base,
+        out_path=out,
+        sources=args.source,
+        http_only=args.http_only,
+        limit=args.limit,
+        use_llm=not args.offline,
+        max_enrich=args.max_enrich,
+        use_cache=not args.no_cache,
+    )
+    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    print(f"✅ 活动库共 {len(activities)} 条 -> {args.out}")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,10 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(func=cmd_serve)
 
-    crawl = sub.add_parser("crawl", help="抓取活动（需要本地 Chrome/Edge）")
+    crawl = sub.add_parser("crawl", help="抓取活动（HTTP 数据源无需浏览器）")
     crawl.add_argument("--source", default="all")
     crawl.add_argument("--out")
+    crawl.add_argument("--limit", type=int)
+    crawl.add_argument("--http-only", action="store_true", help="只跑 HTTP 数据源，跳过需要浏览器的")
     crawl.set_defaults(func=cmd_crawl)
+
+    update = sub.add_parser("update", help="增量更新：抓取 + 合并 + 只标注新增条目")
+    update.add_argument("--source", default="all")
+    update.add_argument("--base", help="现有活动库（默认与 --out 相同）")
+    update.add_argument("--out", help="输出 JSON（默认 data/activities.json）")
+    update.add_argument("--limit", type=int, help="每个数据源最多抓多少条")
+    update.add_argument("--http-only", action="store_true", default=True, help="只跑 HTTP 数据源（默认开启）")
+    update.add_argument("--all-sources", dest="http_only", action="store_false", help="包含需要浏览器的数据源")
+    update.add_argument("--max-enrich", type=int, help="本次最多标注多少条（控制成本）")
+    update.add_argument("--offline", action="store_true", help="不调用 LLM")
+    update.add_argument("--no-cache", action="store_true")
+    update.set_defaults(func=cmd_update)
     return parser
 
 
