@@ -181,7 +181,7 @@ python -m unittest discover -s tests -v     # 53 个用例，全部离线
 定时任务放在站点仓库（因为它需要把结果提交成 `web/data/activities.json` 并发布 Pages）：
 [`wenxiang-website/.github/workflows/refresh-data.yml`](https://github.com/mmikuchua/wenxiang-website/blob/main/.github/workflows/refresh-data.yml)
 
-- 每天 UTC 20:23（北京时间 04:23）运行；
+- 每天两次：UTC 20:23 / 08:23（北京时间 04:23 / 16:23）运行；
 - 每次运行会 checkout 本仓库、抓取 HTTP 数据源、增量合并、只标注新增条目；
 - 结果提交后直接部署到 GitHub Pages；
 - 也可以在 Actions 页面手动触发，指定数据源与本次最多标注条数。
