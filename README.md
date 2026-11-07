@@ -176,16 +176,21 @@ python -m unittest discover -s tests -v     # 53 个用例，全部离线
 覆盖：价格/行政区归一化、日期区间解析、增量合并与过期淘汰、LLM 输出清洗与跳过逻辑、
 6 个数据源的 HTML/JSON 解析、AI 顾问召回与降级。
 
-## 定时更新
+## 手动刷新（不做定时）
 
-定时任务放在站点仓库（因为它需要把结果提交成 `web/data/activities.json` 并发布 Pages）：
-[`wenxiang-website/.github/workflows/refresh-data.yml`](https://github.com/mmikuchua/wenxiang-website/blob/main/.github/workflows/refresh-data.yml)
+**没有定时任务**，只有需要更新数据时才执行。两种方式：
 
-- 每天两次：UTC 20:23 / 08:23（北京时间 04:23 / 16:23）运行；
-- 每次运行会 checkout 本仓库、抓取 HTTP 数据源、增量合并、只标注新增条目；
-- 结果提交后直接部署到 GitHub Pages；
-- 也可以在 Actions 页面手动触发，指定数据源与本次最多标注条数。
+1. 本机命令行（数据源最全，含需要浏览器的大剧院）：
 
+   ```bash
+   python -m xian_activities.cli update --all-sources
+   ```
+
+2. GitHub Actions 手动触发（不需要开电脑）：
+   [`wenxiang-website` → Refresh activity data (manual)](https://github.com/mmikuchua/wenxiang-website/actions/workflows/refresh-data.yml)
+   —— 点「Run workflow」，选数据源和本次最多标注条数，跑完会自动提交并发布 Pages。
+
+流程都是：抓取 → 与现有活动库增量合并 → 只标注新增/变更条目 → 校验 → 输出。
 成本控制：未变化的条目按 `enriched.hash` 跳过，不会重复调用模型；`--max-enrich` 限制单次调用量。
 
 ## 目录
